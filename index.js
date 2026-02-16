@@ -7,18 +7,13 @@
   const MIN_DELAY_MS = 300;
   const MAX_DELAY_MS = 6000;
 
-  const STORAGE_KEYS = {
-    apiKey: 'st-voice-lines:captioning-api-key',
-    voiceBank: 'st-voice-lines:voice-bank',
-  };
-
   const emotionAliases = {
     triste: ['triste', 'deprimido', 'deprimida', 'deprimido(a)', 'sem esperança', 'sem esperanca'],
     feliz: ['feliz', 'neutro', 'animado', 'animada'],
     bravo: ['bravo', 'furioso', 'furiosa', 'argumentativo', 'argumentativa'],
   };
 
-  const defaultVoiceBank = {
+  const voiceBank = {
     triste: [
       'Tudo vai ficar bem... um passo de cada vez.',
       'Entendo sua dor, estou aqui com você.',
@@ -39,9 +34,6 @@
   const state = {
     recentEmotionHistory: [],
     recentVoiceLines: [],
-    apiKey: '',
-    voiceBank: structuredClone(defaultVoiceBank),
-    selectedEmotion: 'triste',
   };
 
   function normalizeText(value) {
@@ -51,42 +43,12 @@
       .toLowerCase();
   }
 
-  function readStorage(key, fallbackValue) {
-    const stored = localStorage.getItem(key);
-    if (!stored) return fallbackValue;
-
-    try {
-      return JSON.parse(stored);
-    } catch (error) {
-      console.warn(`[${EXTENSION_NAME}] Failed to parse storage key ${key}.`, error);
-      return fallbackValue;
-    }
-  }
-
-  function writeStorage(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
-  }
-
-  function loadSettings() {
-    state.apiKey = readStorage(STORAGE_KEYS.apiKey, '') || '';
-
-    const customVoiceBank = readStorage(STORAGE_KEYS.voiceBank, null);
-    if (customVoiceBank && typeof customVoiceBank === 'object') {
-      for (const emotion of Object.keys(defaultVoiceBank)) {
-        if (Array.isArray(customVoiceBank[emotion])) {
-          state.voiceBank[emotion] = customVoiceBank[emotion].filter((line) => typeof line === 'string' && line.trim());
-        }
-      }
-    }
-  }
-
-  function saveVoiceBank() {
-    writeStorage(STORAGE_KEYS.voiceBank, state.voiceBank);
-  }
-
   function countTokens(text) {
     const cleaned = String(text || '').trim();
-    if (!cleaned) return 0;
+    if (!cleaned) {
+      return 0;
+    }
+
     return cleaned.split(/\s+/).length;
   }
 
@@ -126,14 +88,13 @@
   }
 
   async function classifyEmotion(dialogue) {
+    // Integration hook for a future "Captioning AI" model.
+    // If you register a handler on window.STVoiceLines.classifyEmotion,
+    // this extension will call it and fallback to heuristic categorization.
     if (window.STVoiceLines?.classifyEmotion) {
       try {
-        const externalEmotion = await window.STVoiceLines.classifyEmotion(dialogue, {
-          apiKey: state.apiKey,
-          availableEmotions: Object.keys(state.voiceBank),
-        });
-
-        if (typeof externalEmotion === 'string' && state.voiceBank[externalEmotion]) {
+        const externalEmotion = await window.STVoiceLines.classifyEmotion(dialogue);
+        if (typeof externalEmotion === 'string' && voiceBank[externalEmotion]) {
           return externalEmotion;
         }
       } catch (error) {
@@ -145,23 +106,20 @@
   }
 
   function pickVoiceLine(emotion) {
-    const available = state.voiceBank[emotion] || state.voiceBank.feliz;
+    const available = voiceBank[emotion] || voiceBank.feliz;
     const nonRepeated = available.filter((line) => !state.recentVoiceLines.includes(line));
+
     const pool = nonRepeated.length > 0 ? nonRepeated : available;
-
-    if (!pool.length) {
-      return '...';
-    }
-
     const index = Math.floor(Math.random() * pool.length);
     return pool[index];
   }
 
-  function wait(ms) {
+  async function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   async function playVoiceLine(voiceLine, metadata = {}) {
+    // Generic event so other parts of ST can integrate with TTS/audio playback.
     document.dispatchEvent(
       new CustomEvent('st-voice-lines:play', {
         detail: {
@@ -199,7 +157,13 @@
       sourceDialogue: dialogue,
     });
 
-    return { dialogue, emotion, tokenCount, delayMs, voiceLine };
+    return {
+      dialogue,
+      emotion,
+      tokenCount,
+      delayMs,
+      voiceLine,
+    };
   }
 
   async function processAiReply(fullReply) {
@@ -215,6 +179,8 @@
   }
 
   function registerEventBridge() {
+    // Default bridge: any system can dispatch this event with { text }.
+    // It allows simultaneous user output + async voice line generation.
     document.addEventListener('st-voice-lines:reply', async (event) => {
       const replyText = event?.detail?.text;
       if (!replyText) return;
@@ -227,159 +193,21 @@
     });
   }
 
-  function createElement(tagName, className, text) {
-    const el = document.createElement(tagName);
-    if (className) el.className = className;
-    if (text) el.textContent = text;
-    return el;
-  }
+  window.STVoiceLines = {
+    ...window.STVoiceLines,
+    config: {
+      historyWindow: HISTORY_WINDOW,
+      tokenDelayMs: TOKEN_DELAY_MS,
+      minDelayMs: MIN_DELAY_MS,
+      maxDelayMs: MAX_DELAY_MS,
+    },
+    voiceBank,
+    processAiReply,
+    processDialogue,
+    splitDialogues,
+    countTokens,
+  };
 
-  function renderVoiceLineList(listContainer) {
-    listContainer.innerHTML = '';
-    const voiceLines = state.voiceBank[state.selectedEmotion] || [];
-
-    if (!voiceLines.length) {
-      listContainer.append(createElement('p', 'stvl-empty', 'Sem voice lines para esta emoção.'));
-      return;
-    }
-
-    voiceLines.forEach((line, index) => {
-      const row = createElement('div', 'stvl-line-row');
-      const lineLabel = createElement('span', 'stvl-line-text', line);
-      const removeBtn = createElement('button', 'stvl-remove-btn', 'Remover');
-      removeBtn.type = 'button';
-      removeBtn.addEventListener('click', () => {
-        state.voiceBank[state.selectedEmotion].splice(index, 1);
-        saveVoiceBank();
-        renderVoiceLineList(listContainer);
-      });
-
-      row.append(lineLabel, removeBtn);
-      listContainer.append(row);
-    });
-  }
-
-  function buildUi() {
-    const root = createElement('section', 'stvl-panel');
-    const title = createElement('h2', 'stvl-title', 'ST Voice Lines');
-
-    const tabs = createElement('div', 'stvl-tabs');
-    const settingsTabBtn = createElement('button', 'stvl-tab is-active', 'Captioning AI');
-    const voiceTabBtn = createElement('button', 'stvl-tab', 'Banco de vozes');
-    settingsTabBtn.type = 'button';
-    voiceTabBtn.type = 'button';
-
-    const settingsContent = createElement('div', 'stvl-content is-active');
-    const voiceContent = createElement('div', 'stvl-content');
-
-    const apiLabel = createElement('label', 'stvl-label', 'API key do Captioning AI');
-    const apiInput = createElement('input', 'stvl-input');
-    apiInput.type = 'password';
-    apiInput.placeholder = 'Cole a API key aqui';
-    apiInput.value = state.apiKey;
-
-    const apiHint = createElement('p', 'stvl-hint', 'A chave é salva localmente no navegador.');
-    const saveApiButton = createElement('button', 'stvl-primary-btn', 'Salvar API key');
-    saveApiButton.type = 'button';
-    saveApiButton.addEventListener('click', () => {
-      state.apiKey = apiInput.value.trim();
-      writeStorage(STORAGE_KEYS.apiKey, state.apiKey);
-      saveApiButton.textContent = 'Salvo!';
-      setTimeout(() => {
-        saveApiButton.textContent = 'Salvar API key';
-      }, 1200);
-    });
-
-    settingsContent.append(apiLabel, apiInput, saveApiButton, apiHint);
-
-    const emotionLabel = createElement('label', 'stvl-label', 'Emoção');
-    const emotionSelect = createElement('select', 'stvl-input');
-    Object.keys(state.voiceBank).forEach((emotion) => {
-      const option = createElement('option', '', emotion);
-      option.value = emotion;
-      emotionSelect.append(option);
-    });
-    emotionSelect.value = state.selectedEmotion;
-
-    const newLineLabel = createElement('label', 'stvl-label', 'Nova voice line');
-    const newLineInput = createElement('textarea', 'stvl-input stvl-textarea');
-    newLineInput.placeholder = 'Digite uma nova voice line para esta emoção';
-
-    const addLineButton = createElement('button', 'stvl-primary-btn', 'Adicionar voice line');
-    addLineButton.type = 'button';
-
-    const listContainer = createElement('div', 'stvl-lines-list');
-
-    emotionSelect.addEventListener('change', () => {
-      state.selectedEmotion = emotionSelect.value;
-      renderVoiceLineList(listContainer);
-    });
-
-    addLineButton.addEventListener('click', () => {
-      const value = newLineInput.value.trim();
-      if (!value) return;
-
-      const emotion = state.selectedEmotion;
-      if (!state.voiceBank[emotion].includes(value)) {
-        state.voiceBank[emotion].push(value);
-        saveVoiceBank();
-      }
-
-      newLineInput.value = '';
-      renderVoiceLineList(listContainer);
-    });
-
-    voiceContent.append(emotionLabel, emotionSelect, newLineLabel, newLineInput, addLineButton, listContainer);
-    renderVoiceLineList(listContainer);
-
-    function activateTab(target) {
-      const isSettings = target === 'settings';
-      settingsTabBtn.classList.toggle('is-active', isSettings);
-      voiceTabBtn.classList.toggle('is-active', !isSettings);
-      settingsContent.classList.toggle('is-active', isSettings);
-      voiceContent.classList.toggle('is-active', !isSettings);
-    }
-
-    settingsTabBtn.addEventListener('click', () => activateTab('settings'));
-    voiceTabBtn.addEventListener('click', () => activateTab('voices'));
-
-    tabs.append(settingsTabBtn, voiceTabBtn);
-    root.append(title, tabs, settingsContent, voiceContent);
-    document.body.append(root);
-  }
-
-  function init() {
-    loadSettings();
-    registerEventBridge();
-
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', buildUi, { once: true });
-    } else {
-      buildUi();
-    }
-
-    window.STVoiceLines = {
-      ...window.STVoiceLines,
-      config: {
-        historyWindow: HISTORY_WINDOW,
-        tokenDelayMs: TOKEN_DELAY_MS,
-        minDelayMs: MIN_DELAY_MS,
-        maxDelayMs: MAX_DELAY_MS,
-      },
-      getApiKey: () => state.apiKey,
-      setApiKey: (apiKey) => {
-        state.apiKey = String(apiKey || '');
-        writeStorage(STORAGE_KEYS.apiKey, state.apiKey);
-      },
-      voiceBank: state.voiceBank,
-      processAiReply,
-      processDialogue,
-      splitDialogues,
-      countTokens,
-    };
-
-    console.info(`[${EXTENSION_NAME}] initialized.`);
-  }
-
-  init();
+  registerEventBridge();
+  console.info(`[${EXTENSION_NAME}] initialized.`);
 })();
