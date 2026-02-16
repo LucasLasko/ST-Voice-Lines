@@ -60,6 +60,26 @@
   gap: 8px;
 }
 
+#stvl_settings .stvl-action-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#stvl_settings .stvl-test-status {
+  font-size: 0.85em;
+  min-height: 1.2em;
+  opacity: 0.9;
+}
+
+#stvl_settings .stvl-test-status.stvl-test-success {
+  color: #67c587;
+}
+
+#stvl_settings .stvl-test-status.stvl-test-error {
+  color: #ee6b6b;
+}
+
 .stvl-caption-emotion {
   margin-top: 8px;
   display: inline-block;

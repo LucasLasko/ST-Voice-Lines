@@ -13,6 +13,7 @@
     enabled: true,
     secondsPerToken: 0.2,
     emotionAudio: {},
+    testMessage: '"This is a connection test from ST Voice Lines."',
   };
 
   const state = {
@@ -53,6 +54,62 @@
 
   const saveSettings = () => {
     if (typeof globalThis.saveSettingsDebounced === 'function') globalThis.saveSettingsDebounced();
+  };
+
+  const applySettingsFromUi = () => {
+    const settings = getSettingsRoot();
+    const enabled = document.getElementById('stvl_enabled');
+    const apiKey = document.getElementById('stvl_api_key');
+    const model = document.getElementById('stvl_model');
+    const prompt = document.getElementById('stvl_prompt');
+    const tokenDelay = document.getElementById('stvl_token_delay');
+    const testMessage = document.getElementById('stvl_test_message');
+    const tokenDelayValue = document.getElementById('stvl_token_delay_value');
+
+    settings.enabled = Boolean(enabled?.checked);
+    settings.apiKey = apiKey?.value?.trim() || '';
+    settings.model = model?.value || settings.model;
+    settings.prompt = prompt?.value || DEFAULT_SETTINGS.prompt;
+    settings.secondsPerToken = Math.min(1, Math.max(0, Number(tokenDelay?.value) || 0));
+    settings.testMessage = testMessage?.value?.trim() || DEFAULT_SETTINGS.testMessage;
+
+    if (tokenDelayValue) tokenDelayValue.textContent = settings.secondsPerToken.toFixed(2);
+    saveSettings();
+    return settings;
+  };
+
+  const setApiTestStatus = (text, isError = false) => {
+    const status = document.getElementById('stvl_test_status');
+    if (!status) return;
+    status.textContent = text;
+    status.classList.toggle('stvl-test-error', isError);
+    status.classList.toggle('stvl-test-success', Boolean(text) && !isError);
+  };
+
+  const testApiConnection = async () => {
+    const settings = applySettingsFromUi();
+    if (!settings.apiKey) {
+      setApiTestStatus('Add an OpenRouter API key first.', true);
+      return;
+    }
+
+    const emotions = settings.emotions.filter(Boolean);
+    if (!emotions.length) {
+      setApiTestStatus('Add at least one emotion before testing.', true);
+      return;
+    }
+
+    try {
+      setApiTestStatus('Testing API connection...');
+      const result = await classifyEmotion(settings.testMessage || DEFAULT_SETTINGS.testMessage);
+      if (!result) {
+        setApiTestStatus('API responded, but no valid emotion was returned for the test message.', true);
+        return;
+      }
+      setApiTestStatus(`Connected. Test message classified as: ${result}`);
+    } catch (error) {
+      setApiTestStatus(`Connection failed: ${error.message}`, true);
+    }
   };
 
   const getQuotedDialogueSegments = (text) => {
@@ -408,6 +465,15 @@
         <label for="stvl_token_delay">Token delay per token: <span id="stvl_token_delay_value"></span> sec</label>
         <input id="stvl_token_delay" type="range" min="0" max="1" step="0.05" />
 
+        <label for="stvl_test_message">Test message</label>
+        <input id="stvl_test_message" type="text" class="text_pole" placeholder='"Testing message"' />
+
+        <div class="stvl-action-row">
+          <button id="stvl_apply_settings" type="button" class="menu_button">Apply Settings</button>
+          <button id="stvl_test_api" type="button" class="menu_button">Test API Connection</button>
+        </div>
+        <div id="stvl_test_status" class="stvl-test-status"></div>
+
         <label>Allowed emotions + MP3 upload</label>
         <div id="stvl_emotions_list" class="stvl-emotions-list"></div>
 
@@ -426,12 +492,14 @@
     const prompt = document.getElementById('stvl_prompt');
     const tokenDelay = document.getElementById('stvl_token_delay');
     const tokenDelayValue = document.getElementById('stvl_token_delay_value');
+    const testMessage = document.getElementById('stvl_test_message');
 
     enabled.checked = settings.enabled;
     apiKey.value = settings.apiKey;
     prompt.value = settings.prompt;
     tokenDelay.value = String(settings.secondsPerToken);
     tokenDelayValue.textContent = Number(settings.secondsPerToken).toFixed(2);
+    testMessage.value = settings.testMessage || DEFAULT_SETTINGS.testMessage;
 
     enabled.addEventListener('change', () => {
       settings.enabled = enabled.checked;
@@ -458,6 +526,17 @@
       tokenDelayValue.textContent = settings.secondsPerToken.toFixed(2);
       saveSettings();
     });
+
+    testMessage.addEventListener('input', () => {
+      settings.testMessage = testMessage.value.trim() || DEFAULT_SETTINGS.testMessage;
+      saveSettings();
+    });
+
+    document.getElementById('stvl_apply_settings')?.addEventListener('click', () => {
+      applySettingsFromUi();
+      setApiTestStatus('Settings applied.');
+    });
+    document.getElementById('stvl_test_api')?.addEventListener('click', testApiConnection);
 
     document.getElementById('stvl_add_emotion')?.addEventListener('click', addEmotion);
     document.getElementById('stvl_new_emotion')?.addEventListener('keydown', (event) => {
