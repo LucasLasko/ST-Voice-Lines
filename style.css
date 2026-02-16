@@ -1,1 +1,39 @@
+#stvl_settings .inline-drawer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
 
+#stvl_settings .stvl-emotions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+#stvl_settings .stvl-emotion-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 6px;
+}
+
+#stvl_settings .stvl-emotion-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.stvl-caption-emotion {
+  margin-top: 8px;
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  font-size: 0.85em;
+  opacity: 0.9;
+}
