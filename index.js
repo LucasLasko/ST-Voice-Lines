@@ -12,6 +12,7 @@
       'You are a captioning assistant. Pick exactly one emotion from the allowed list that best matches the user dialogue tone. Return only JSON in the form {"emotion":"<allowed_emotion>"}.',
     emotions: ['happy', 'sad', 'angry', 'fearful', 'surprised', 'neutral'],
     enabled: true,
+    notificationEnabled: true,
     secondsPerToken: 0.2,
     emotionAudio: {},
     testMessage: '"This is a connection test from ST Voice Lines."',
@@ -98,6 +99,7 @@
   const applySettingsFromUi = () => {
     const settings = getSettingsRoot();
     const enabled = document.getElementById('stvl_enabled');
+    const notificationEnabled = document.getElementById('stvl_notification_enabled');
     const apiKey = document.getElementById('stvl_api_key');
     const model = document.getElementById('stvl_model');
     const prompt = document.getElementById('stvl_prompt');
@@ -106,6 +108,7 @@
     const tokenDelayValue = document.getElementById('stvl_token_delay_value');
 
     settings.enabled = Boolean(enabled?.checked);
+    settings.notificationEnabled = Boolean(notificationEnabled?.checked);
     settings.apiKey = apiKey?.value?.trim() || '';
     settings.model = model?.value || settings.model;
     settings.prompt = prompt?.value || DEFAULT_SETTINGS.prompt;
@@ -165,22 +168,18 @@
     }
   };
 
-  const getQuotedDialogueSegments = (text) => {
-    if (!text || typeof text !== 'string') return [];
+  const getCharacterDialogue = (text) => {
+    if (!text || typeof text !== 'string') return '';
 
-    const regex = /["“]([\s\S]*?)["”]/g;
-    const segments = [];
-    let match;
+    const noMarkup = text
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\*[^*]*\*/g, ' ')
+      .replace(/\[[^\]]*\]/g, ' ')
+      .replace(/\([^\)]*\)/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-    while ((match = regex.exec(text)) !== null) {
-      const dialogue = match[1]?.trim();
-      if (!dialogue) continue;
-
-      const beforeText = text.slice(0, match.index);
-      segments.push({ dialogue, tokensBefore: tokenizeCount(beforeText) });
-    }
-
-    return segments;
+    return noMarkup;
   };
 
   const parseEmotionResponse = (content, allowed) => {
@@ -252,6 +251,29 @@
     }, delayMs);
   };
 
+  const showCaptionNotification = (dialogue, emotion) => {
+    const settings = getSettingsRoot();
+    if (!settings.notificationEnabled) return;
+
+    let container = document.getElementById('stvl_notification_container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'stvl_notification_container';
+      document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = 'stvl-notification-toast';
+    const preview = dialogue.length > 120 ? `${dialogue.slice(0, 117)}...` : dialogue;
+    toast.textContent = `Captioned as ${emotion}: ${preview}`;
+    container.appendChild(toast);
+
+    window.setTimeout(() => {
+      toast.classList.add('stvl-toast-hide');
+      window.setTimeout(() => toast.remove(), 250);
+    }, 3500);
+  };
+
   const renderEmotionBadge = (messageId, results) => {
     const mes = document.querySelector(`.mes[mesid="${messageId}"]`);
     if (!mes) return;
@@ -263,7 +285,7 @@
       (mes.querySelector('.mes_block') || mes).appendChild(container);
     }
 
-    container.textContent = `Caption emotion(s): ${results.map((item) => item.emotion).join(' | ')}`;
+    container.textContent = `Caption emotion: ${results[0]?.emotion || 'unknown'}`;
   };
 
   const processMessage = async (messageId) => {
@@ -277,10 +299,10 @@
     const message = context?.chat?.[messageId];
     if (!message || message.is_user || message.is_system) return;
 
-    const segments = getQuotedDialogueSegments(message.mes);
-    if (!segments.length) return;
+    const dialogue = getCharacterDialogue(message.mes);
+    if (!dialogue) return;
 
-    const sourceKey = JSON.stringify(segments.map((segment) => segment.dialogue));
+    const sourceKey = dialogue;
     message.extra = message.extra || {};
 
     if (Array.isArray(message.extra.stvlCaptionResults) && message.extra.stvlCaptionSource === sourceKey) {
@@ -290,15 +312,12 @@
 
     state.processing.add(key);
     try {
-      const results = [];
-      for (const segment of segments) {
-        const emotion = await classifyEmotion(segment.dialogue);
-        if (!emotion) continue;
-        results.push({ dialogue: segment.dialogue, emotion, tokensBefore: segment.tokensBefore });
-        scheduleEmotionAudio(emotion, segment.tokensBefore);
-      }
+      const emotion = await classifyEmotion(dialogue);
+      if (!emotion) return;
 
-      if (!results.length) return;
+      const results = [{ dialogue, emotion, tokensBefore: 0 }];
+      scheduleEmotionAudio(emotion, 0);
+      showCaptionNotification(dialogue, emotion);
       message.extra.stvlCaptionResults = results;
       message.extra.stvlCaptionSource = sourceKey;
       renderEmotionBadge(messageId, results);
@@ -505,6 +524,9 @@
         <label class="checkbox_label" for="stvl_enabled">
           <input type="checkbox" id="stvl_enabled" /> Enable captioning
         </label>
+        <label class="checkbox_label" for="stvl_notification_enabled">
+          <input type="checkbox" id="stvl_notification_enabled" /> Show caption notification (top-right)
+        </label>
 
         <label for="stvl_api_key">Captioning AI API key (OpenRouter)</label>
         <input id="stvl_api_key" type="password" class="text_pole" placeholder="sk-or-..." />
@@ -542,6 +564,7 @@
     host.appendChild(container);
 
     const enabled = document.getElementById('stvl_enabled');
+    const notificationEnabled = document.getElementById('stvl_notification_enabled');
     const apiKey = document.getElementById('stvl_api_key');
     const model = document.getElementById('stvl_model');
     const prompt = document.getElementById('stvl_prompt');
@@ -550,6 +573,7 @@
     const testMessage = document.getElementById('stvl_test_message');
 
     enabled.checked = settings.enabled;
+    notificationEnabled.checked = settings.notificationEnabled !== false;
     apiKey.value = settings.apiKey;
     prompt.value = settings.prompt;
     tokenDelay.value = String(settings.secondsPerToken);
@@ -560,6 +584,11 @@
 
     enabled.addEventListener('change', () => {
       settings.enabled = enabled.checked;
+      saveSettings();
+    });
+
+    notificationEnabled.addEventListener('change', () => {
+      settings.notificationEnabled = notificationEnabled.checked;
       saveSettings();
     });
 
