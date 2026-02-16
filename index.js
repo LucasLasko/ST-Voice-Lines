@@ -1,18 +1,12 @@
 (() => {
   const EXTENSION_NAME = 'st_voice_lines';
-  const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-  const MODEL_OPTIONS = [
-    'openai/gpt-4o-mini',
-    'openai/gpt-4o',
-    'anthropic/claude-3.5-sonnet',
-    'anthropic/claude-3.7-sonnet',
-    'google/gemini-2.0-flash-001',
-    'meta-llama/llama-3.1-70b-instruct',
-  ];
+  const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
+  const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
+  const FALLBACK_MODELS = ['openai/gpt-4o-mini', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet'];
 
   const DEFAULT_SETTINGS = {
     apiKey: '',
-    model: MODEL_OPTIONS[0],
+    model: FALLBACK_MODELS[0],
     prompt:
       'You are a captioning assistant. Pick exactly one emotion from the allowed list that best matches the user dialogue tone. Return only JSON in the form {"emotion":"<allowed_emotion>"}.',
     emotions: ['happy', 'sad', 'angry', 'fearful', 'surprised', 'neutral'],
@@ -22,13 +16,13 @@
   };
 
   const state = {
-    processing: new Set(),
     initialized: false,
+    processing: new Set(),
+    availableModels: [...FALLBACK_MODELS],
   };
 
-  const tokenizeCount = (text) => (text.match(/\S+/g) || []).length;
-
   const clone = (obj) => JSON.parse(JSON.stringify(obj));
+  const tokenizeCount = (text) => (text.match(/\S+/g) || []).length;
 
   const getSettingsRoot = () => {
     if (!globalThis.extension_settings) globalThis.extension_settings = {};
@@ -44,10 +38,7 @@
       : DEFAULT_SETTINGS.secondsPerToken;
 
     settings.emotions.forEach((emotion) => {
-      if (!settings.emotionAudio[emotion]) {
-        settings.emotionAudio[emotion] = { maxFiles: 3, files: [] };
-      }
-      settings.emotionAudio[emotion].maxFiles = Math.max(1, Number(settings.emotionAudio[emotion].maxFiles) || 1);
+      if (!settings.emotionAudio[emotion]) settings.emotionAudio[emotion] = { files: [] };
       settings.emotionAudio[emotion].files = Array.isArray(settings.emotionAudio[emotion].files)
         ? settings.emotionAudio[emotion].files
         : [];
@@ -76,10 +67,7 @@
       if (!dialogue) continue;
 
       const beforeText = text.slice(0, match.index);
-      segments.push({
-        dialogue,
-        tokensBefore: tokenizeCount(beforeText),
-      });
+      segments.push({ dialogue, tokensBefore: tokenizeCount(beforeText) });
     }
 
     return segments;
@@ -92,7 +80,7 @@
       const parsed = JSON.parse(content);
       if (parsed?.emotion && allowed.includes(parsed.emotion)) return parsed.emotion;
     } catch {
-      // relaxed parser fallback
+      // fallback parsing below
     }
 
     const lowered = content.toLowerCase();
@@ -102,10 +90,9 @@
   const classifyEmotion = async (dialogue) => {
     const settings = getSettingsRoot();
     const emotions = settings.emotions.filter(Boolean);
-
     if (!settings.apiKey || !emotions.length) return null;
 
-    const response = await fetch(OPENROUTER_URL, {
+    const response = await fetch(OPENROUTER_CHAT_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -118,7 +105,7 @@
           { role: 'system', content: settings.prompt },
           {
             role: 'user',
-            content: `Allowed emotions:\n${emotions.map((e) => `- ${e}`).join('\n')}\n\nDialogue:\n${dialogue}`,
+            content: `Allowed emotions:\n${emotions.map((emotion) => `- ${emotion}`).join('\n')}\n\nDialogue:\n${dialogue}`,
           },
         ],
       }),
@@ -135,24 +122,16 @@
   };
 
   const pickAudioForEmotion = (emotion) => {
-    const settings = getSettingsRoot();
-    const bucket = settings.emotionAudio?.[emotion];
-    if (!bucket?.files?.length) return null;
-
-    const maxFiles = Math.max(1, Number(bucket.maxFiles) || 1);
-    const pool = bucket.files.slice(0, maxFiles);
-    if (!pool.length) return null;
-
-    const index = Math.floor(Math.random() * pool.length);
-    return pool[index];
+    const files = getSettingsRoot().emotionAudio?.[emotion]?.files || [];
+    if (!files.length) return null;
+    return files[Math.floor(Math.random() * files.length)];
   };
 
   const scheduleEmotionAudio = (emotion, tokensBefore) => {
-    const settings = getSettingsRoot();
     const chosen = pickAudioForEmotion(emotion);
     if (!chosen?.dataUrl) return;
 
-    const delayMs = Math.round(tokensBefore * settings.secondsPerToken * 1000);
+    const delayMs = Math.round(tokensBefore * getSettingsRoot().secondsPerToken * 1000);
     window.setTimeout(async () => {
       try {
         const audio = new Audio(chosen.dataUrl);
@@ -171,12 +150,10 @@
     if (!container) {
       container = document.createElement('div');
       container.className = 'stvl-caption-emotion';
-      const block = mes.querySelector('.mes_block') || mes;
-      block.appendChild(container);
+      (mes.querySelector('.mes_block') || mes).appendChild(container);
     }
 
-    const summary = results.map((item) => item.emotion).join(' | ');
-    container.textContent = `Caption emotion(s): ${summary}`;
+    container.textContent = `Caption emotion(s): ${results.map((item) => item.emotion).join(' | ')}`;
   };
 
   const processMessage = async (messageId) => {
@@ -193,7 +170,7 @@
     const segments = getQuotedDialogueSegments(message.mes);
     if (!segments.length) return;
 
-    const sourceKey = JSON.stringify(segments.map((s) => s.dialogue));
+    const sourceKey = JSON.stringify(segments.map((segment) => segment.dialogue));
     message.extra = message.extra || {};
 
     if (Array.isArray(message.extra.stvlCaptionResults) && message.extra.stvlCaptionSource === sourceKey) {
@@ -202,7 +179,6 @@
     }
 
     state.processing.add(key);
-
     try {
       const results = [];
       for (const segment of segments) {
@@ -213,11 +189,9 @@
       }
 
       if (!results.length) return;
-
       message.extra.stvlCaptionResults = results;
       message.extra.stvlCaptionSource = sourceKey;
       renderEmotionBadge(messageId, results);
-
       if (typeof globalThis.saveChatDebounced === 'function') globalThis.saveChatDebounced();
     } catch (error) {
       console.warn('[ST Voice Lines] Captioning failed:', error);
@@ -231,8 +205,8 @@
     if (!context?.chat?.length) return;
 
     for (let i = context.chat.length - 1; i >= 0; i--) {
-      const message = context.chat[i];
-      if (!message || message.is_user || message.is_system) continue;
+      const msg = context.chat[i];
+      if (!msg || msg.is_user || msg.is_system) continue;
       await processMessage(i);
       break;
     }
@@ -252,15 +226,13 @@
     if (!value) return;
 
     const settings = getSettingsRoot();
-    if (settings.emotions.includes(value)) {
-      input.value = '';
-      return;
+    if (!settings.emotions.includes(value)) {
+      settings.emotions.push(value);
+      settings.emotionAudio[value] = { files: [] };
+      renderEmotionList();
+      saveSettings();
     }
 
-    settings.emotions.push(value);
-    settings.emotionAudio[value] = { maxFiles: 3, files: [] };
-    renderEmotionList();
-    saveSettings();
     input.value = '';
   };
 
@@ -283,11 +255,11 @@
     const list = document.getElementById('stvl_emotions_list');
     if (!list) return;
 
-    list.innerHTML = '';
     const settings = getSettingsRoot();
+    list.innerHTML = '';
 
     settings.emotions.forEach((emotion) => {
-      const bucket = settings.emotionAudio[emotion] || { maxFiles: 3, files: [] };
+      const bucket = settings.emotionAudio[emotion] || { files: [] };
 
       const row = document.createElement('div');
       row.className = 'stvl-emotion-row';
@@ -301,64 +273,106 @@
 
       const meta = document.createElement('div');
       meta.className = 'stvl-emotion-meta';
-      meta.textContent = `Loaded clips: ${bucket.files.length}`;
+      meta.textContent = `Stored MP3 files: ${bucket.files.length}`;
 
-      left.append(title, meta);
+      const names = document.createElement('div');
+      names.className = 'stvl-emotion-files';
+      names.textContent = bucket.files.length
+        ? bucket.files.map((file) => file.name).join(', ')
+        : 'No files uploaded yet';
 
-      const controls = document.createElement('div');
-      controls.className = 'stvl-emotion-actions';
+      left.append(title, meta, names);
 
-      const count = document.createElement('input');
-      count.type = 'number';
-      count.className = 'text_pole stvl-small-input';
-      count.min = '1';
-      count.step = '1';
-      count.value = String(bucket.maxFiles || 1);
-      count.title = 'How many mp3 files to keep in this emotion category';
-      count.addEventListener('change', () => {
-        bucket.maxFiles = Math.max(1, Number(count.value) || 1);
-        bucket.files = bucket.files.slice(0, bucket.maxFiles);
-        settings.emotionAudio[emotion] = bucket;
-        renderEmotionList();
-        saveSettings();
-      });
+      const actions = document.createElement('div');
+      actions.className = 'stvl-emotion-actions';
 
-      const upload = document.createElement('input');
-      upload.type = 'file';
-      upload.accept = '.mp3,audio/mpeg';
-      upload.multiple = true;
-      upload.addEventListener('change', async () => {
-        const files = await readFilesAsDataUrl(upload.files || []);
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = '.mp3,audio/mpeg';
+      fileInput.multiple = true;
+      fileInput.className = 'stvl-hidden-file-input';
+
+      const uploadButton = document.createElement('button');
+      uploadButton.type = 'button';
+      uploadButton.className = 'menu_button';
+      uploadButton.textContent = 'Upload MP3';
+      uploadButton.addEventListener('click', () => fileInput.click());
+
+      fileInput.addEventListener('change', async () => {
+        const files = await readFilesAsDataUrl(fileInput.files || []);
         if (!files.length) return;
-
-        bucket.files = [...bucket.files, ...files].slice(0, Math.max(1, Number(bucket.maxFiles) || 1));
+        bucket.files = [...bucket.files, ...files];
         settings.emotionAudio[emotion] = bucket;
         renderEmotionList();
         saveSettings();
-        upload.value = '';
+        fileInput.value = '';
       });
 
-      const clear = document.createElement('button');
-      clear.type = 'button';
-      clear.className = 'menu_button';
-      clear.textContent = 'Clear';
-      clear.addEventListener('click', () => {
+      const clearButton = document.createElement('button');
+      clearButton.type = 'button';
+      clearButton.className = 'menu_button';
+      clearButton.textContent = 'Clear MP3s';
+      clearButton.addEventListener('click', () => {
         bucket.files = [];
         settings.emotionAudio[emotion] = bucket;
         renderEmotionList();
         saveSettings();
       });
 
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'menu_button stvl-remove-emotion';
-      remove.textContent = 'Remove Emotion';
-      remove.addEventListener('click', () => removeEmotion(emotion));
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'menu_button stvl-remove-emotion';
+      removeButton.textContent = 'Remove Emotion';
+      removeButton.addEventListener('click', () => removeEmotion(emotion));
 
-      controls.append(count, upload, clear, remove);
-      row.append(left, controls);
+      actions.append(fileInput, uploadButton, clearButton, removeButton);
+      row.append(left, actions);
       list.appendChild(row);
     });
+  };
+
+  const fillModelDropdown = async () => {
+    const select = document.getElementById('stvl_model');
+    if (!select) return;
+
+    const settings = getSettingsRoot();
+    select.innerHTML = '<option value="">Loading models from OpenRouter...</option>';
+
+    try {
+      const response = await fetch(OPENROUTER_MODELS_URL);
+      if (!response.ok) throw new Error(`Model list request failed (${response.status})`);
+      const payload = await response.json();
+      const modelIds = (payload?.data || [])
+        .map((item) => item?.id)
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+
+      state.availableModels = modelIds.length ? modelIds : [...FALLBACK_MODELS];
+    } catch (error) {
+      console.warn('[ST Voice Lines] Could not load OpenRouter model list, using fallback list.', error);
+      state.availableModels = [...FALLBACK_MODELS];
+    }
+
+    const selected = settings.model;
+    select.innerHTML = '';
+
+    state.availableModels.forEach((modelName) => {
+      const option = document.createElement('option');
+      option.value = modelName;
+      option.textContent = modelName;
+      select.appendChild(option);
+    });
+
+    if (selected && !state.availableModels.includes(selected)) {
+      const custom = document.createElement('option');
+      custom.value = selected;
+      custom.textContent = `${selected} (saved)`;
+      select.prepend(custom);
+    }
+
+    select.value = selected && [...state.availableModels, selected].includes(selected) ? selected : state.availableModels[0];
+    settings.model = select.value;
+    saveSettings();
   };
 
   const buildSettingsUi = () => {
@@ -394,7 +408,7 @@
         <label for="stvl_token_delay">Token delay per token: <span id="stvl_token_delay_value"></span> sec</label>
         <input id="stvl_token_delay" type="range" min="0" max="1" step="0.05" />
 
-        <label>Allowed emotions + MP3 category controls</label>
+        <label>Allowed emotions + MP3 upload</label>
         <div id="stvl_emotions_list" class="stvl-emotions-list"></div>
 
         <div class="stvl-emotion-controls">
@@ -418,14 +432,6 @@
     prompt.value = settings.prompt;
     tokenDelay.value = String(settings.secondsPerToken);
     tokenDelayValue.textContent = Number(settings.secondsPerToken).toFixed(2);
-
-    MODEL_OPTIONS.forEach((option) => {
-      const el = document.createElement('option');
-      el.value = option;
-      el.textContent = option;
-      model.appendChild(el);
-    });
-    model.value = settings.model || DEFAULT_SETTINGS.model;
 
     enabled.addEventListener('change', () => {
       settings.enabled = enabled.checked;
@@ -462,6 +468,7 @@
     });
 
     renderEmotionList();
+    fillModelDropdown();
   };
 
   const bindEvents = () => {
@@ -469,18 +476,13 @@
     const types = globalThis.event_types;
     if (!source || !types || typeof source.on !== 'function') return;
 
-    const candidateEvents = [
-      types.MESSAGE_RECEIVED,
-      types.CHARACTER_MESSAGE_RENDERED,
-      types.GENERATION_ENDED,
-      types.MESSAGE_SWIPED,
-    ].filter(Boolean);
-
-    candidateEvents.forEach((eventType) => {
-      source.on(eventType, () => {
-        processLatestAssistantMessage();
+    [types.MESSAGE_RECEIVED, types.CHARACTER_MESSAGE_RENDERED, types.GENERATION_ENDED, types.MESSAGE_SWIPED]
+      .filter(Boolean)
+      .forEach((eventType) => {
+        source.on(eventType, () => {
+          processLatestAssistantMessage();
+        });
       });
-    });
   };
 
   const restoreBadgesForVisibleChat = () => {
@@ -503,11 +505,9 @@
     restoreBadgesForVisibleChat();
     processLatestAssistantMessage();
 
-    const observer = new MutationObserver(() => {
+    new MutationObserver(() => {
       buildSettingsUi();
-    });
-
-    observer.observe(document.body, { childList: true, subtree: true });
+    }).observe(document.body, { childList: true, subtree: true });
   };
 
   if (document.readyState === 'loading') {
