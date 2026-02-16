@@ -508,6 +508,7 @@
 
         <label for="stvl_api_key">Captioning AI API key (OpenRouter)</label>
         <input id="stvl_api_key" type="password" class="text_pole" placeholder="sk-or-..." />
+        <button id="stvl_save_api_key" type="button" class="menu_button">Save API Key</button>
         <div id="stvl_api_key_status" class="stvl-test-status"></div>
 
         <label for="stvl_test_message">Test message</label>
@@ -562,6 +563,14 @@
       saveSettings();
     });
 
+    const commitApiKeyNow = () => {
+      settings.apiKey = apiKey.value.trim();
+      persistApiKeyBackup(settings.apiKey);
+      saveSettings(true);
+      setApiKeyStatus();
+      setApiTestStatus('API key saved.');
+    };
+
     apiKey.addEventListener('input', () => {
       settings.apiKey = apiKey.value.trim();
       persistApiKeyBackup(settings.apiKey);
@@ -569,14 +578,9 @@
       setApiKeyStatus();
     });
 
-    const commitApiKeyNow = () => {
-      settings.apiKey = apiKey.value.trim();
-      persistApiKeyBackup(settings.apiKey);
-      saveSettings(true);
-      setApiKeyStatus();
-    };
     apiKey.addEventListener('change', commitApiKeyNow);
     apiKey.addEventListener('blur', commitApiKeyNow);
+    document.getElementById('stvl_save_api_key')?.addEventListener('click', commitApiKeyNow);
 
     model.addEventListener('change', () => {
       settings.model = model.value;
