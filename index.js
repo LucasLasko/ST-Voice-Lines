@@ -456,15 +456,6 @@
         <label for="stvl_api_key">Captioning AI API key (OpenRouter)</label>
         <input id="stvl_api_key" type="password" class="text_pole" placeholder="sk-or-..." />
 
-        <label for="stvl_model">Model (OpenRouter)</label>
-        <select id="stvl_model" class="text_pole"></select>
-
-        <label for="stvl_prompt">Captioning prompt</label>
-        <textarea id="stvl_prompt" class="text_pole" rows="4"></textarea>
-
-        <label for="stvl_token_delay">Token delay per token: <span id="stvl_token_delay_value"></span> sec</label>
-        <input id="stvl_token_delay" type="range" min="0" max="1" step="0.05" />
-
         <label for="stvl_test_message">Test message</label>
         <input id="stvl_test_message" type="text" class="text_pole" placeholder='"Testing message"' />
 
@@ -473,6 +464,15 @@
           <button id="stvl_test_api" type="button" class="menu_button">Test API Connection</button>
         </div>
         <div id="stvl_test_status" class="stvl-test-status"></div>
+
+        <label for="stvl_model">Model (OpenRouter)</label>
+        <select id="stvl_model" class="text_pole"></select>
+
+        <label for="stvl_prompt">Captioning prompt</label>
+        <textarea id="stvl_prompt" class="text_pole" rows="4"></textarea>
+
+        <label for="stvl_token_delay">Token delay per token: <span id="stvl_token_delay_value"></span> sec</label>
+        <input id="stvl_token_delay" type="range" min="0" max="1" step="0.05" />
 
         <label>Allowed emotions + MP3 upload</label>
         <div id="stvl_emotions_list" class="stvl-emotions-list"></div>
