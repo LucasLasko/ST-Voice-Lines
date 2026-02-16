@@ -1,0 +1,11 @@
+{
+  "display_name": "ST Voice Lines",
+  "loading_order": 100,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "Novium",
+  "version": "1.0.0",
+  "homePage": "https://github.com/LucasLasko/ST-Voice-Lines"
+}
