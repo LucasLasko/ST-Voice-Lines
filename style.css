@@ -1,1 +1,71 @@
+#stvl_settings .inline-drawer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
 
+#stvl_settings .stvl-emotions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+#stvl_settings .stvl-emotion-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  border-radius: 6px;
+}
+
+#stvl_settings .stvl-emotion-left {
+  min-width: 160px;
+  max-width: 60%;
+}
+
+#stvl_settings .stvl-emotion-title {
+  font-weight: 600;
+}
+
+#stvl_settings .stvl-emotion-meta {
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+#stvl_settings .stvl-emotion-files {
+  font-size: 0.8em;
+  opacity: 0.75;
+  word-break: break-word;
+}
+
+#stvl_settings .stvl-emotion-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+#stvl_settings .stvl-hidden-file-input {
+  display: none;
+}
+
+#stvl_settings .stvl-emotion-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.stvl-caption-emotion {
+  margin-top: 8px;
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--SmartThemeBorderColor);
+  font-size: 0.85em;
+  opacity: 0.95;
+}
