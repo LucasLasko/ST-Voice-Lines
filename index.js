@@ -3,6 +3,7 @@
   const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
   const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
   const FALLBACK_MODELS = ['openai/gpt-4o-mini', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet'];
+  const API_KEY_BACKUP_STORAGE_KEY = 'st_voice_lines_api_key';
 
   const DEFAULT_SETTINGS = {
     apiKey: '',
@@ -49,11 +50,49 @@
       if (!settings.emotions.includes(emotion)) delete settings.emotionAudio[emotion];
     });
 
+    restoreApiKeyBackup(settings);
     return settings;
   };
 
-  const saveSettings = () => {
-    if (typeof globalThis.saveSettingsDebounced === 'function') globalThis.saveSettingsDebounced();
+  const saveSettings = (immediate = false) => {
+    const context = globalThis.getContext?.();
+
+    if (immediate) {
+      if (typeof globalThis.saveSettings === 'function') {
+        globalThis.saveSettings();
+        return;
+      }
+      if (typeof context?.saveSettings === 'function') {
+        context.saveSettings();
+        return;
+      }
+    }
+
+    if (typeof globalThis.saveSettingsDebounced === 'function') {
+      globalThis.saveSettingsDebounced();
+      return;
+    }
+    if (typeof context?.saveSettingsDebounced === 'function') {
+      context.saveSettingsDebounced();
+    }
+  };
+
+  const persistApiKeyBackup = (apiKey) => {
+    try {
+      localStorage.setItem(API_KEY_BACKUP_STORAGE_KEY, apiKey || '');
+    } catch {
+      // ignore localStorage failures
+    }
+  };
+
+  const restoreApiKeyBackup = (settings) => {
+    if (settings.apiKey) return;
+    try {
+      const backup = localStorage.getItem(API_KEY_BACKUP_STORAGE_KEY) || '';
+      if (backup) settings.apiKey = backup;
+    } catch {
+      // ignore localStorage failures
+    }
   };
 
   const applySettingsFromUi = () => {
@@ -73,8 +112,9 @@
     settings.secondsPerToken = Math.min(1, Math.max(0, Number(tokenDelay?.value) || 0));
     settings.testMessage = testMessage?.value?.trim() || DEFAULT_SETTINGS.testMessage;
 
+    persistApiKeyBackup(settings.apiKey);
     if (tokenDelayValue) tokenDelayValue.textContent = settings.secondsPerToken.toFixed(2);
-    saveSettings();
+    saveSettings(true);
     return settings;
   };
 
@@ -514,6 +554,7 @@
     tokenDelay.value = String(settings.secondsPerToken);
     tokenDelayValue.textContent = Number(settings.secondsPerToken).toFixed(2);
     testMessage.value = settings.testMessage || DEFAULT_SETTINGS.testMessage;
+    persistApiKeyBackup(settings.apiKey);
     setApiKeyStatus();
 
     enabled.addEventListener('change', () => {
@@ -523,9 +564,19 @@
 
     apiKey.addEventListener('input', () => {
       settings.apiKey = apiKey.value.trim();
+      persistApiKeyBackup(settings.apiKey);
       saveSettings();
       setApiKeyStatus();
     });
+
+    const commitApiKeyNow = () => {
+      settings.apiKey = apiKey.value.trim();
+      persistApiKeyBackup(settings.apiKey);
+      saveSettings(true);
+      setApiKeyStatus();
+    };
+    apiKey.addEventListener('change', commitApiKeyNow);
+    apiKey.addEventListener('blur', commitApiKeyNow);
 
     model.addEventListener('change', () => {
       settings.model = model.value;
@@ -604,6 +655,12 @@
     new MutationObserver(() => {
       buildSettingsUi();
     }).observe(document.body, { childList: true, subtree: true });
+
+    window.addEventListener('beforeunload', () => {
+      const settings = getSettingsRoot();
+      persistApiKeyBackup(settings.apiKey);
+      saveSettings(true);
+    });
   };
 
   if (document.readyState === 'loading') {
