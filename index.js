@@ -86,6 +86,19 @@
     status.classList.toggle('stvl-test-success', Boolean(text) && !isError);
   };
 
+  const setApiKeyStatus = () => {
+    const keyStatus = document.getElementById('stvl_api_key_status');
+    if (!keyStatus) return;
+
+    const hasKey = Boolean(getSettingsRoot().apiKey);
+    keyStatus.textContent = hasKey
+      ? 'An API key is already saved and currently in use.'
+      : 'No API key saved yet.';
+    keyStatus.classList.toggle('stvl-test-success', hasKey);
+    keyStatus.classList.toggle('stvl-test-error', !hasKey);
+  };
+
+
   const testApiConnection = async () => {
     const settings = applySettingsFromUi();
     if (!settings.apiKey) {
@@ -455,6 +468,7 @@
 
         <label for="stvl_api_key">Captioning AI API key (OpenRouter)</label>
         <input id="stvl_api_key" type="password" class="text_pole" placeholder="sk-or-..." />
+        <div id="stvl_api_key_status" class="stvl-test-status"></div>
 
         <label for="stvl_test_message">Test message</label>
         <input id="stvl_test_message" type="text" class="text_pole" placeholder='"Testing message"' />
@@ -500,6 +514,7 @@
     tokenDelay.value = String(settings.secondsPerToken);
     tokenDelayValue.textContent = Number(settings.secondsPerToken).toFixed(2);
     testMessage.value = settings.testMessage || DEFAULT_SETTINGS.testMessage;
+    setApiKeyStatus();
 
     enabled.addEventListener('change', () => {
       settings.enabled = enabled.checked;
@@ -509,6 +524,7 @@
     apiKey.addEventListener('input', () => {
       settings.apiKey = apiKey.value.trim();
       saveSettings();
+      setApiKeyStatus();
     });
 
     model.addEventListener('change', () => {
@@ -534,6 +550,7 @@
 
     document.getElementById('stvl_apply_settings')?.addEventListener('click', () => {
       applySettingsFromUi();
+      setApiKeyStatus();
       setApiTestStatus('Settings applied.');
     });
     document.getElementById('stvl_test_api')?.addEventListener('click', testApiConnection);
